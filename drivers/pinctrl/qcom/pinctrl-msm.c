@@ -31,6 +31,7 @@
 #include <linux/interrupt.h>
 #include <linux/spinlock.h>
 #include <linux/syscore_ops.h>
+#include <linux/wakeup_reason.h>
 #include <linux/reboot.h>
 #include <linux/pm.h>
 #include <linux/log2.h>
@@ -2026,9 +2027,6 @@ static void msm_pinctrl_resume(void)
 	}
 #endif
 
-	if (!msm_show_resume_irq_mask)
-		return;
-
 	raw_spin_lock_irqsave(&pctrl->lock, flags);
 	for_each_set_bit(i, pctrl->enabled_irqs, pctrl->chip.ngpio) {
 		g = &pctrl->soc->groups[i];
@@ -2041,7 +2039,12 @@ static void msm_pinctrl_resume(void)
 			else if (desc->action && desc->action->name)
 				name = desc->action->name;
 
-			pr_warn("%s: %d triggered %s\n", __func__, irq, name);
+			/* report the gpio instead of the tlmm summary irq */
+			log_threaded_irq_wakeup_reason(irq, pctrl->irq);
+
+			if (msm_show_resume_irq_mask)
+				pr_warn("%s: %d triggered %s\n", __func__,
+					irq, name);
 		}
 	}
 	raw_spin_unlock_irqrestore(&pctrl->lock, flags);
