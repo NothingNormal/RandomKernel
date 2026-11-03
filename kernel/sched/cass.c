@@ -59,9 +59,10 @@ unsigned long cass_cpu_util(int cpu, int this_cpu, bool sync)
 /*
  * LazyExec: the foreground app's UI/render threads sleep between frames, so
  * their util "fits" a little core and CASS keeps waking them there (Insta's
- * main thread ran on big cores 1-3% of the time). Without uclamp/WALT on 4.14
- * nothing else steers them, so for top-app tasks with nice <= cass_boost_nice
- * only CPUs with room for CASS_BOOST_UTIL count as fitting (big cores).
+ * main thread ran on big cores 1-3% of the time). uclamp.min steers them when
+ * userspace sets it (see cass_fit_util()); on top of that, top-app tasks with
+ * nice <= cass_boost_nice only count CPUs with room for CASS_BOOST_UTIL as
+ * fitting (big cores), unless their uclamp.max caps them below their util.
  * echo -21 > /sys/module/fair/parameters/cass_boost_nice disables it.
  */
 #define CASS_BOOST_UTIL	(SCHED_CAPACITY_SCALE / 2)
@@ -81,6 +82,30 @@ static inline bool cass_task_boosted(struct task_struct *p)
 	return cgrp && cgrp->kn && !strcmp(cgrp->kn->name, "top-app");
 #else
 	return false;
+#endif
+}
+
+/*
+ * The utilization CASS sizes @p with: its estimated util clamped to its
+ * effective uclamp range. A uclamp.min boost makes only CPUs with room for it
+ * count as fitting; a uclamp.max cap lets a heavy background task fit a little
+ * CPU. The CPU candidates' own utilization keeps using @p's raw util.
+ */
+static inline unsigned long cass_fit_util(struct task_struct *p,
+					  unsigned long p_util, bool *boosted)
+{
+#ifdef CONFIG_UCLAMP_TASK
+	unsigned long uc_min = uclamp_eff_value(p, UCLAMP_MIN);
+	unsigned long uc_max = uclamp_eff_value(p, UCLAMP_MAX);
+
+	*boosted = uc_min > 0;
+	/* Like uclamp_util_with(), a min above max wins */
+	if (uc_min >= uc_max)
+		return uc_min;
+	return clamp(p_util, uc_min, uc_max);
+#else
+	*boosted = false;
+	return p_util;
 #endif
 }
 
@@ -136,7 +161,7 @@ static int cass_best_cpu(struct task_struct *p, int prev_cpu, bool sync)
 	struct cass_cpu_cand cands[2], *best = cands, *curr;
 	int this_cpu = raw_smp_processor_id();
 	struct cpuidle_state *idle_state;
-	bool has_idle = false;
+	bool has_idle = false, boosted;
 	unsigned long p_util, fit_util;
 	const struct cpumask *mask = &p->cpus_allowed;
 	struct cpumask fit_mask;
@@ -150,9 +175,13 @@ static int cass_best_cpu(struct task_struct *p, int prev_cpu, bool sync)
 	 * idle_get_state().
 	 */
 	rcu_read_lock();
-	fit_util = p_util;
-	if (cass_task_boosted(p)) {
+	fit_util = cass_fit_util(p, p_util, &boosted);
+	/* The nice-based top-app boost stacks on uclamp, unless @p is capped */
+	if (fit_util >= p_util && cass_task_boosted(p)) {
 		fit_util = max_t(unsigned long, fit_util, CASS_BOOST_UTIL);
+		boosted = true;
+	}
+	if (boosted) {
 		/*
 		 * An idle CPU always beats a busy one below, so a boosted task
 		 * would still land on an idle little core whenever the big cores
