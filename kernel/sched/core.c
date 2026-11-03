@@ -801,7 +801,13 @@ unsigned int sysctl_sched_uclamp_util_max = SCHED_CAPACITY_SCALE;
  * This knob will not override the system default sched_util_clamp_min defined
  * above.
  */
-unsigned int sysctl_sched_uclamp_util_min_rt_default = SCHED_CAPACITY_SCALE;
+/*
+ * LazyExec: RT tasks (audio, SurfaceFlinger, input) would otherwise ask for
+ * the max frequency every time they run, and this vendor's init never lowers
+ * it (Pixels write 0 from their rc). Default to no RT boost; userspace can
+ * still raise it through /proc/sys/kernel/sched_util_clamp_min_rt_default.
+ */
+unsigned int sysctl_sched_uclamp_util_min_rt_default;
 
 /* All clamps are required to be less or equal than these values */
 static struct uclamp_se uclamp_default[UCLAMP_CNT];
