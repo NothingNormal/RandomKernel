@@ -1710,6 +1710,9 @@ static int __init thermal_init(void)
 	if (result)
 		goto unregister_governors;
 
+	/* xiaomi userspace interface; not fatal if it fails */
+	thermal_message_init(&thermal_class);
+
 	result = of_parse_thermal_zones();
 	if (result)
 		goto exit_zone_parse;

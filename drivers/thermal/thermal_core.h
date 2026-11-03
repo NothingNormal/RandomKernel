@@ -198,4 +198,7 @@ void of_thermal_handle_trip_temp(struct thermal_zone_device *tz,
 { }
 #endif
 
+/* thermal_message.c */
+int thermal_message_init(struct class *cls);
+
 #endif /* __THERMAL_CORE_H__ */
