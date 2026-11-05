@@ -469,6 +469,13 @@ config MAGIC_SYSRQ_SERIAL
 	  This option allows you to decide whether you want to enable the
 	  magic SysRq key.
 
+config DEBUG_PERSISTENT_LOG
+	bool "Keep kernel logs on the logdump partition and catch stuck boots"
+	depends on BLOCK
+	help
+	  Debug kernels only. Writes the kernel log to the raw "logdump" partition so it
+	  survives hangs, and panics if system_server never starts.
+
 config DEBUG_KERNEL
 	bool "Kernel debugging"
 	help

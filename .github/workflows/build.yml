@@ -10,6 +10,14 @@ on:
       - "v*"
   workflow_dispatch:
     inputs:
+      kernel_type:
+        description: "release, or debug: logs kept on logdump, panics on any stall, not for users"
+        required: true
+        type: choice
+        options:
+          - release
+          - debug
+        default: release
       variant:
         description: "Variants to build"
         required: true
@@ -84,6 +92,7 @@ jobs:
       - name: Set version
         env:
           VERSION_INPUT: ${{ inputs.version }}
+          KERNEL_TYPE: ${{ inputs.kernel_type }}
         run: |
           # kernel name comes from CONFIG_LOCALVERSION, the version from the tag
           name=$(sed -n 's/^CONFIG_LOCALVERSION="-\(.*\)"/\1/p' "arch/arm64/configs/${DEFCONFIG}")
@@ -95,6 +104,7 @@ jobs:
           else
             version="${GITHUB_REF_NAME//\//-}-${GITHUB_SHA::7}"
           fi
+          if [ "$KERNEL_TYPE" = debug ]; then version="${version}-debug"; fi
           variant=$([ "$KSU" = true ] && echo KSU || echo NoKSU)
           # zip name: name-version-device-type-date
           echo "KERNEL_NAME=${name}" >> "$GITHUB_ENV"
@@ -153,9 +163,39 @@ jobs:
           sed -i '/drivers\/kernelsu\/Kconfig/d' drivers/Kconfig
           sed -i '/kernelsu\//d' drivers/Makefile
 
+      - name: Apply debug kernel
+        if: ${{ inputs.kernel_type == 'debug' }}
+        run: |
+          # debug builds reboot on any stall and keep logs on the logdump partition: not for users
+          cfg="arch/arm64/configs/${DEFCONFIG}"
+          atoll=arch/arm64/boot/dts/qcom/cust-atoll.dtsi
+          pm=arch/arm64/boot/dts/qcom/cust-pm6150.dtsi
+          # log every driver as it starts, at every level
+          grep -q '^CONFIG_CMDLINE="' "$cfg"
+          sed -i 's/^CONFIG_CMDLINE="\(.*\)"$/CONFIG_CMDLINE="\1 initcall_debug ignore_loglevel printk.devkmsg=on"/' "$cfg"
+          # the defconfig has no final newline; without this the first option below is lost
+          sed -i -e '$a\\' "$cfg"
+          for opt in DEBUG_PERSISTENT_LOG=y DEBUG_KERNEL=y LOCKUP_DETECTOR=y SOFTLOCKUP_DETECTOR=y \
+            BOOTPARAM_SOFTLOCKUP_PANIC=y BOOTPARAM_SOFTLOCKUP_PANIC_VALUE=1 DETECT_HUNG_TASK=y \
+            BOOTPARAM_HUNG_TASK_PANIC=y BOOTPARAM_HUNG_TASK_PANIC_VALUE=1 \
+            DEFAULT_HUNG_TASK_TIMEOUT=60 PANIC_ON_OOPS=y PANIC_ON_OOPS_VALUE=1; do
+            name="${opt%%=*}"
+            sed -i -e "/^# CONFIG_${name} is not set$/d" -e "/^CONFIG_${name}=/d" "$cfg"
+            echo "CONFIG_${opt}" >> "$cfg"
+          done
+          grep -qx 'CONFIG_DEBUG_PERSISTENT_LOG=y' "$cfg"
+          # keep a console log in RAM as well
+          grep -q 'record-size = <0x200000>;' "$atoll"
+          sed -i -e 's/record-size = <0x200000>;/record-size = <0x100000>;\n\t\tconsole-size = <0x200000>;/' \
+            -e 's/pmsg-size = <0x200000>;/pmsg-size = <0x100000>;/' "$atoll"
+          # holding power resets warm, so RAM survives
+          grep -q PON_POWER_OFF_TYPE_HARD_RESET "$pm"
+          sed -i 's/PON_POWER_OFF_TYPE_HARD_RESET/PON_POWER_OFF_TYPE_WARM_RESET/' "$pm"
+
       - name: Build
         env:
           EXTRA_CONFIG: ${{ inputs.config }}
+          KERNEL_TYPE: ${{ inputs.kernel_type }}
           KSU_DEBUG: ${{ inputs.ksu_debug }}
           CLEAN: ${{ inputs.clean }}
         run: |
@@ -171,6 +211,9 @@ jobs:
             CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu-
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- LOCALVERSION="-${VERSION}")
           make "${MAKE_ARGS[@]}" "${DEFCONFIG}"
+          if [ "$KERNEL_TYPE" = debug ] && ! grep -qx 'CONFIG_DEBUG_PERSISTENT_LOG=y' out/.config; then
+            echo "::error::debug kernel lost CONFIG_DEBUG_PERSISTENT_LOG"; exit 1
+          fi
           # dispatch toggles on top of the defconfig
           extra="$EXTRA_CONFIG"
           if [ "$KSU" = true ] && [ "$KSU_DEBUG" = true ]; then extra="$extra CONFIG_KSU_DEBUG=y"; fi
@@ -241,7 +284,7 @@ jobs:
           include-hidden-files: true
 
       - name: Upload to Telegram
-        if: ${{ github.event_name == 'push' || inputs.telegram }}
+        if: ${{ inputs.kernel_type != 'debug' && (github.event_name == 'push' || inputs.telegram) }}
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
