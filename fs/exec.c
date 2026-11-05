@@ -1894,10 +1894,12 @@ orig_flow:
 	if (retval < 0)
 		goto out;
 
-	if (capable(CAP_SYS_ADMIN)) {
-		if (unlikely(!strcmp(filename->name, ZYGOTE32_BIN)))
+	/* the name first: capable() would log a denial for every other program exec'd */
+	if (unlikely(!strcmp(filename->name, ZYGOTE32_BIN))) {
+		if (capable(CAP_SYS_ADMIN))
 			zygote32_pid = current->pid;
-		else if (unlikely(!strcmp(filename->name, ZYGOTE64_BIN)))
+	} else if (unlikely(!strcmp(filename->name, ZYGOTE64_BIN))) {
+		if (capable(CAP_SYS_ADMIN))
 			zygote64_pid = current->pid;
 	}
 
