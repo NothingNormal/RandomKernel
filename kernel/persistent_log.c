@@ -20,6 +20,7 @@
 #include <linux/freezer.h>
 #include <linux/genhd.h>
 #include <linux/init.h>
+#include <linux/input/qpnp-power-on.h>
 #include <linux/kernel.h>
 #include <linux/kmsg_dump.h>
 #include <linux/kthread.h>
@@ -247,6 +248,14 @@ static int plog_thread(void *arg)
 	}
 	pr_info("logging to %s, slot at %llu\n", PLOG_PART, plog_slot_start);
 	register_reboot_notifier(&plog_reboot_nb);
+
+	/*
+	 * This thread and the storage sleep during suspend, so only RAM can hold
+	 * what happens then. An unplanned reset is a hard reset by default, which
+	 * wipes RAM; make it warm so pstore survives. A clean reboot still sets hard.
+	 */
+	ret = qpnp_pon_system_pwr_off(PON_POWER_OFF_WARM_RESET);
+	pr_info("warm reset for unplanned resets: %d\n", ret);
 
 	set_freezable();
 	set_user_nice(current, -10);

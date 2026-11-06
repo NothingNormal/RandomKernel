@@ -170,9 +170,9 @@ jobs:
           cfg="arch/arm64/configs/${DEFCONFIG}"
           atoll=arch/arm64/boot/dts/qcom/cust-atoll.dtsi
           pm=arch/arm64/boot/dts/qcom/cust-pm6150.dtsi
-          # log every driver as it starts, at every level
+          # log every driver as it starts, at every level, and keep logging to RAM through suspend
           grep -q '^CONFIG_CMDLINE="' "$cfg"
-          sed -i 's/^CONFIG_CMDLINE="\(.*\)"$/CONFIG_CMDLINE="\1 initcall_debug ignore_loglevel printk.devkmsg=on"/' "$cfg"
+          sed -i 's/^CONFIG_CMDLINE="\(.*\)"$/CONFIG_CMDLINE="\1 initcall_debug ignore_loglevel printk.devkmsg=on no_console_suspend"/' "$cfg"
           # the defconfig has no final newline; without this the first option below is lost
           sed -i -e '$a\\' "$cfg"
           for opt in DEBUG_PERSISTENT_LOG=y DEBUG_KERNEL=y LOCKUP_DETECTOR=y SOFTLOCKUP_DETECTOR=y \
