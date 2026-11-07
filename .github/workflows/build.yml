@@ -178,7 +178,8 @@ jobs:
           for opt in DEBUG_PERSISTENT_LOG=y DEBUG_KERNEL=y LOCKUP_DETECTOR=y SOFTLOCKUP_DETECTOR=y \
             BOOTPARAM_SOFTLOCKUP_PANIC=y BOOTPARAM_SOFTLOCKUP_PANIC_VALUE=1 DETECT_HUNG_TASK=y \
             BOOTPARAM_HUNG_TASK_PANIC=y BOOTPARAM_HUNG_TASK_PANIC_VALUE=1 \
-            DEFAULT_HUNG_TASK_TIMEOUT=60 PANIC_ON_OOPS=y PANIC_ON_OOPS_VALUE=1; do
+            DEFAULT_HUNG_TASK_TIMEOUT=60 PANIC_ON_OOPS=y PANIC_ON_OOPS_VALUE=1 \
+            DEBUG_FS=y MSM_TZ_LOG=y; do
             name="${opt%%=*}"
             sed -i -e "/^# CONFIG_${name} is not set$/d" -e "/^CONFIG_${name}=/d" "$cfg"
             echo "CONFIG_${opt}" >> "$cfg"
@@ -211,8 +212,13 @@ jobs:
             CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu-
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- LOCALVERSION="-${VERSION}")
           make "${MAKE_ARGS[@]}" "${DEFCONFIG}"
-          if [ "$KERNEL_TYPE" = debug ] && ! grep -qx 'CONFIG_DEBUG_PERSISTENT_LOG=y' out/.config; then
-            echo "::error::debug kernel lost CONFIG_DEBUG_PERSISTENT_LOG"; exit 1
+          if [ "$KERNEL_TYPE" = debug ]; then
+            # MSM_TZ_LOG gives the TrustZone logs in /sys/kernel/debug/tzdbg and needs DEBUG_FS
+            for opt in DEBUG_PERSISTENT_LOG DEBUG_FS MSM_TZ_LOG; do
+              if ! grep -qx "CONFIG_${opt}=y" out/.config; then
+                echo "::error::debug kernel lost CONFIG_${opt}"; exit 1
+              fi
+            done
           fi
           # dispatch toggles on top of the defconfig
           extra="$EXTRA_CONFIG"
